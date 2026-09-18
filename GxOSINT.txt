@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import socket
+import ssl
+
+from datetime import datetime
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        description="GxOSINT - recopilación básica de información pública"
+    )
+
+    parser.add_argument(
+        "target",
+        help="Dominio o URL autorizada"
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="reports/osint.json"
+    )
+
+    args = parser.parse_args()
+
+    target = args.target.strip()
+
+    if "://" in target:
+
+        parsed = urlparse(target)
+        host = parsed.hostname
+
+    else:
+
+        host = target.split("/")[0]
+        host = host.split(":")[0]
+
+    if not host:
+
+        print("[!] Objetivo inválido.")
+        return
+
+    report = {
+
+        "tool": "GxOSINT",
+
+        "version": "1.1.0",
+
+        "target": target,
+
+        "timestamp_utc":
+            datetime.utcnow().isoformat() + "Z",
+
+        "dns": {},
+
+        "http": {},
+
+        "authorized_use_only": True
+    }
+
+    # DNS
+
+    try:
+
+        addresses = socket.gethostbyname_ex(host)[2]
+
+        report["dns"]["addresses"] = sorted(
+            set(addresses)
+        )
+
+    except socket.gaierror as error:
+
+        report["dns"]["error"] = str(error)
+
+    # HTTP
+
+    for scheme in ("https", "http"):
+
+        url = f"{scheme}://{host}/"
+
+        try:
+
+            request = Request(
+                url,
+                headers={
+                    "User-Agent":
+                        "GxOSINT/1.1"
+                }
+            )
+
+            context = ssl.create_default_context()
+
+            with urlopen(
+                request,
+                timeout=5,
+                context=context
+            ) as response:
+
+                report["http"] = {
+
+                    "url": url,
+
+                    "status":
+                        response.status,
+
+                    "headers":
+                        dict(response.headers.items())
+                }
+
+                break
+
+        except Exception as error:
+
+            report["http"][
+                f"{scheme}_error"
+            ] = str(error)
+
+    os.makedirs(
+        os.path.dirname(args.output) or ".",
+        exist_ok=True
+    )
+
+    with open(
+        args.output,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            report,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
+
+    print("\n[+] GxOSINT")
+    print(f"[+] Host: {host}")
+
+    print(
+        "[+] Direcciones:",
+        len(
+            report["dns"].get(
+                "addresses",
+                []
+            )
+        )
+    )
+
+    print(
+        f"[+] Reporte: {args.output}"
+    )
+
+
+if name == "main":
+    main()
